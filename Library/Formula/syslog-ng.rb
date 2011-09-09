@@ -1,24 +1,51 @@
 require 'formula'
 
-class SyslogNg <Formula
-  url 'http://www.balabit.com/downloads/files/syslog-ng/open-source-edition/3.0.8/source/syslog-ng_3.0.8.tar.gz'
+class SyslogNg < Formula
+  url 'http://www.balabit.com/downloads/files?path=/syslog-ng/sources/3.2.4/source/syslog-ng_3.2.4.tar.gz'
   homepage 'http://www.balabit.com/network-security/syslog-ng/'
-  md5 '7107f5758dec4b774136f0f827b35258'
+  md5 '5995f7dad0053a478b60a63f6f754203'
 
   depends_on 'pkg-config' => :build
   depends_on 'pcre'
   depends_on 'eventlog'
+  depends_on 'glib'
 
-  def patches
-    { :p0 =>
-      "http://trac.macports.org/export/70550/trunk/dports/sysutils/syslog-ng/files/patch-src-Makefile.in.diff"
-    }
-  end
+  def patches; DATA; end
 
   def install
-    system "./configure", "--disable-debug", "--disable-dependency-tracking",
+    ENV.append 'LDFLAGS', '-levtlog -lglib-2.0' # help the linker find symbols
+    system "./configure", "--disable-debug",
+                          "--disable-dependency-tracking",
                           "--enable-dynamic-linking",
-                          "--prefix=#{prefix}"
+                          "--prefix=#{prefix}",
+                          "--sysconfdir=#{etc}",
+                          "--localstatedir=#{var}"
     system "make install"
   end
 end
+
+__END__
+Fix for environ on OS X, by @adamv
+
+diff --git a/lib/gprocess.c b/lib/gprocess.c
+index 38bcb12..ed68a7f 100644
+--- a/lib/gprocess.c
++++ b/lib/gprocess.c
+@@ -51,6 +51,9 @@
+ #  include <sys/prctl.h>
+ #endif
+ 
++#include <crt_externs.h>
++#define environ (*_NSGetEnviron())
++
+ /*
+  * NOTES:
+  * 
+@@ -440,7 +443,6 @@ g_process_set_caps(const gchar *caps)
+ void
+ g_process_set_argv_space(gint argc, gchar **argv)
+ {
+-  extern char **environ;
+   gchar *lastargv = NULL;
+   gchar **envp    = environ;
+   gint i;

@@ -1,23 +1,51 @@
 require 'formula'
 require 'hardware'
 
-class Mongodb <Formula
+class Mongodb < Formula
   homepage 'http://www.mongodb.org/'
 
-  if Hardware.is_64_bit? and not ARGV.include? '--32bit'
-    url 'http://fastdl.mongodb.org/osx/mongodb-osx-x86_64-1.6.4.tgz'
-    md5 '3448de46d51c0dbe8195d3f80c8a7ecd'
-    version '1.6.4-x86_64'
+  if ARGV.build_head?
+    packages = {
+      :x86_64 => {
+        :url => 'http://fastdl.mongodb.org/osx/mongodb-osx-x86_64-2.0.0-rc2.tgz',
+        :md5 => '9e9185524c695055bd9d86bdb98b5b9b',
+        :version => '2.0.0-rc2-x86_64'
+      },
+      :i386 => {
+        :url => 'http://fastdl.mongodb.org/osx/mongodb-osx-i386-2.0.0-rc2.tgz',
+        :md5 => '9afdabf654d3965c6c0bfd3e032b830e',
+        :version => '2.0.0-rc2-i386'
+      }
+    }
   else
-    url 'http://fastdl.mongodb.org/osx/mongodb-osx-i386-1.6.4.tgz'
-    md5 'dacf9ead604ae278330dfa227d906fc1'
-    version '1.6.4-i386'
+    packages = {
+      :x86_64 => {
+        :url => 'http://fastdl.mongodb.org/osx/mongodb-osx-x86_64-1.8.3.tgz',
+        :md5 => '8bdb3e110d6391d66379c5425c1c4e6e',
+        :version => '1.8.3-x86_64'
+      },
+      :i386 => {
+        :url => 'http://fastdl.mongodb.org/osx/mongodb-osx-i386-1.8.3.tgz',
+        :md5 => '5629e49d6d24a99850fb094efb98685c',
+        :version => '1.8.3-i386'
+      }
+    }
   end
+
+  package = (Hardware.is_64_bit? and not ARGV.include? '--32bit') ? packages[:x86_64] : packages[:i386]
+
+  url     package[:url]
+  md5     package[:md5]
+  version package[:version]
 
   skip_clean :all
 
   def options
-    [['--32bit', 'Install the 32-bit version.']]
+    [
+        ['--32bit', 'Override arch detection and install the 32-bit version.'],
+        ['--nojournal', 'Disable write-ahead logging (Journaling)'],
+        ['--rest', 'Enable the REST Interface on the HTTP Status Page'],
+    ]
   end
 
   def install
@@ -31,31 +59,76 @@ class Mongodb <Formula
     # Write the configuration files and launchd script
     (prefix+'mongod.conf').write mongodb_conf
     (prefix+'org.mongodb.mongod.plist').write startup_plist
+    (prefix+'org.mongodb.mongod.plist').chmod 0644
   end
 
-  def caveats; <<-EOS
-If this is your first install, automatically load on login with:
-    cp #{prefix}/org.mongodb.mongod.plist ~/Library/LaunchAgents
-    launchctl load -w ~/Library/LaunchAgents/org.mongodb.mongod.plist
+  def caveats
+    s = ""
+    s += <<-EOS.undent
+    If this is your first install, automatically load on login with:
+        mkdir -p ~/Library/LaunchAgents
+        cp #{prefix}/org.mongodb.mongod.plist ~/Library/LaunchAgents/
+        launchctl load -w ~/Library/LaunchAgents/org.mongodb.mongod.plist
 
-If this is an upgrade and you already have the org.mongodb.mongod.plist loaded:
-    launchctl unload -w ~/Library/LaunchAgents/org.mongodb.mongod.plist
-    cp #{prefix}/org.mongodb.mongod.plist ~/Library/LaunchAgents
-    launchctl load -w ~/Library/LaunchAgents/org.mongodb.mongod.plist
+    If this is an upgrade and you already have the org.mongodb.mongod.plist loaded:
+        launchctl unload -w ~/Library/LaunchAgents/org.mongodb.mongod.plist
+        cp #{prefix}/org.mongodb.mongod.plist ~/Library/LaunchAgents/
+        launchctl load -w ~/Library/LaunchAgents/org.mongodb.mongod.plist
 
-Or start it manually:
-    mongod run --config #{prefix}/mongod.conf
-EOS
+    Or start it manually:
+        mongod run --config #{prefix}/mongod.conf
+    EOS
+
+    if ARGV.include? "--nojournal"
+        s += ""
+        s += <<-EOS.undent
+        Write Ahead logging (Journaling) has been disabled.
+        EOS
+    else
+        s += ""
+        s += <<-EOS.undent
+        MongoDB 1.8+ includes a feature for Write Ahead Logging (Journaling), which has been enabled by default.
+        This is not the default in production (Journaling is disabled); to disable journaling, use --nojournal.
+        EOS
+    end
+
+    return s
   end
 
   def mongodb_conf
-    return <<-EOS
-# Store data in #{var}/mongodb instead of the default /data/db
-dbpath = #{var}/mongodb
+    conf = ""
+    conf += <<-EOS.undent
+    # Store data in #{var}/mongodb instead of the default /data/db
+    dbpath = #{var}/mongodb
 
-# Only accept local connections
-bind_ip = 127.0.0.1
-EOS
+    # Only accept local connections
+    bind_ip = 127.0.0.1
+    EOS
+
+    if ARGV.build_head?
+      if ARGV.include? '--nojournal'
+        conf += <<-EOS.undent
+        # Enable Write Ahead Logging (not enabled by default in production deployments)
+        nojournal = true
+        EOS
+      end
+    else
+      unless ARGV.include? '--nojournal'
+        conf += <<-EOS.undent
+        # Enable Write Ahead Logging (not enabled by default in production deployments)
+        journal = true
+        EOS
+      end
+    end
+
+    if ARGV.include? '--rest'
+        conf += <<-EOS.undent
+        # Enable the REST interface on the HTTP Console (startup port + 1000)
+        rest = true
+        EOS
+    end
+
+    return conf
   end
 
   def startup_plist
@@ -76,7 +149,7 @@ EOS
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <false/>
   <key>UserName</key>
   <string>#{`whoami`.chomp}</string>
   <key>WorkingDirectory</key>
